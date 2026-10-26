@@ -485,8 +485,9 @@
                 choose.disabled = true;
                 notice.textContent = "";
                 try {
-                  persistMediaSelection(item.media_id);
                   const next = await callTool("get_media", { media_id: item.media_id });
+                  if (next.isError) throw new Error("VidXP could not find that video.");
+                  persistMediaSelection(item.media_id);
                   const detail = next.structuredContent;
                   lede.textContent = `Selected ${detail.original_filename || item.original_filename || item.media_id}.`;
                 } catch (_error) {

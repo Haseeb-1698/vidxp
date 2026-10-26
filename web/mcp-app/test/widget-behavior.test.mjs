@@ -282,3 +282,25 @@ test("a failed or error status check keeps progress on screen and keeps polling"
   assert.equal(widget.roots.notice.textContent, "VidXP returned an error checking job status.");
   assert.equal(widget.pollTimers().length, 1);
 });
+
+test("a video that get_media rejects is not saved as selected", async () => {
+  const states = [];
+  let reply = { structuredContent: {}, content: [], isError: true };
+  const widget = createWidget({
+    openai: {
+      toolOutput: firstPage,
+      setWidgetState(state) { states.push(state); },
+      async callTool() { return reply; },
+    },
+  });
+  const choose = widget.findButton("Use this video");
+  await choose.click();
+  assert.deepEqual(states, []);
+  assert.equal(widget.roots.notice.textContent, "Could not select that video.");
+  assert.doesNotMatch(widget.roots.lede.textContent, /^Selected/);
+
+  reply = { structuredContent: { media_id: "media-1", original_filename: "first.mp4" }, content: [] };
+  await choose.click();
+  assert.deepEqual(plain(states), [{ selectedMediaId: "media-1" }]);
+  assert.equal(widget.roots.lede.textContent, "Selected first.mp4.");
+});

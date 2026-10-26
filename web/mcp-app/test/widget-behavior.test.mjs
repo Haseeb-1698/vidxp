@@ -36,7 +36,7 @@ function descendants(node) {
   return [node, ...node.children.flatMap((child) => descendants(child))];
 }
 
-function createWidget() {
+function createWidget({ openai } = {}) {
   const roots = Object.fromEntries(
     ["title", "lede", "content", "notice", "expand"].map((id) => {
       const node = new FakeNode(id === "expand" ? "button" : "div");
@@ -60,7 +60,7 @@ function createWidget() {
   };
   const window = {
     parent,
-    openai: undefined,
+    openai,
     setTimeout(callback, delay) {
       const id = nextTimer++;
       timers.set(id, { callback, delay });
@@ -106,7 +106,10 @@ function createWidget() {
       await callback();
     }
   };
-  return { roots, posted, timers, send, toolResult, findButton, toolCalls, pollTimers, runPollTimers };
+  const textsOf = (className) => descendants(roots.content)
+    .filter((node) => node.className === className)
+    .map((node) => node.textContent);
+  return { roots, posted, timers, send, toolResult, findButton, toolCalls, pollTimers, runPollTimers, textsOf };
 }
 
 const progress = {
@@ -119,6 +122,19 @@ const progress = {
   progress: { stage: "speech", current: 1, total: 2 },
 };
 const emptyLibrary = { items: [], total: 0, next_cursor: null };
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+// Values built inside the widget's vm context carry that context's prototypes.
+const plain = (value) => JSON.parse(JSON.stringify(value));
+const firstPage = {
+  items: [{ media_id: "media-1", original_filename: "first.mp4", state: "ready" }],
+  total: 2,
+  next_cursor: "cursor-2",
+};
+const secondPage = {
+  items: [{ media_id: "media-2", original_filename: "second.mp4", state: "ready" }],
+  total: 2,
+  next_cursor: null,
+};
 
 test("empty MediaPage renders the library empty state without swallowing unrelated item results", () => {
   const widget = createWidget();
@@ -203,4 +219,39 @@ test("failed manual refresh re-enables the button for retry", async () => {
     result: { structuredContent: { ...progress, terminal: true }, content: [] },
   });
   await secondClick;
+});
+
+test("Load more pages with the host's tool input and appends to the list", async () => {
+  const widget = createWidget();
+  widget.send({
+    jsonrpc: "2.0",
+    method: "ui/notifications/tool-input",
+    params: { arguments: { filename: "clip", page_size: 1 } },
+  });
+  widget.toolResult(firstPage);
+  const click = widget.findButton("Load more").click();
+  const call = widget.toolCalls().at(-1);
+  assert.equal(call.params.name, "list_media");
+  assert.deepEqual(plain(call.params.arguments), { filename: "clip", page_size: 1, cursor: "cursor-2" });
+  widget.send({ jsonrpc: "2.0", id: call.id, result: { structuredContent: secondPage, content: [] } });
+  await click;
+  assert.deepEqual(widget.textsOf("tile-title"), ["first.mp4", "second.mp4"]);
+  assert.equal(widget.findButton("Load more"), undefined);
+});
+
+test("Load more uses ChatGPT's toolInput for the first page", async () => {
+  const calls = [];
+  const widget = createWidget({
+    openai: {
+      toolInput: { state: "ready" },
+      toolOutput: firstPage,
+      async callTool(name, args) {
+        calls.push({ name, args });
+        return { structuredContent: secondPage, content: [] };
+      },
+    },
+  });
+  await widget.findButton("Load more").click();
+  assert.deepEqual(plain(calls), [{ name: "list_media", args: { state: "ready", cursor: "cursor-2" } }]);
+  assert.deepEqual(widget.textsOf("tile-title"), ["first.mp4", "second.mp4"]);
 });

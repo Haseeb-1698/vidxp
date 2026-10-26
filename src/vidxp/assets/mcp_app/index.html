@@ -90,6 +90,7 @@
         let hostCapabilities = {};
         let hostContext = {};
         let progressGeneration = 0;
+        let toolInput = null;
 
         const element = (tag, className, text) => {
           const node = document.createElement(tag);
@@ -510,7 +511,13 @@
               notice.textContent = "";
               try {
                 const nextQuery = { ...query, cursor: data.next_cursor };
-                render(await callTool("list_media", nextQuery), { mediaQuery: nextQuery });
+                const next = await callTool("list_media", nextQuery);
+                if (next.isError) throw new Error("VidXP could not load more videos.");
+                const page = next.structuredContent;
+                render(
+                  { ...next, structuredContent: { ...page, items: [...items, ...asArray(page.items)] } },
+                  { mediaQuery: nextQuery }
+                );
               } catch (_error) {
                 notice.textContent = "Could not load more videos.";
                 more.disabled = false;
@@ -625,7 +632,8 @@
             else request.resolve(message.result);
             return;
           }
-          if (message.method === "ui/notifications/tool-result") render(message.params);
+          if (message.method === "ui/notifications/tool-input") toolInput = asObject(message.params?.arguments);
+          if (message.method === "ui/notifications/tool-result") render(message.params, { mediaQuery: toolInput });
           if (message.method === "ui/notifications/host-context-changed") updateHostContext(message.params);
           if (message.method === "ui/notifications/tool-cancelled") notice.textContent = message.params?.reason || "The tool call was cancelled.";
           if (message.method === "ui/resource-teardown" && message.id !== undefined) {
@@ -648,8 +656,9 @@
         });
         updateHostContext({});
         const initialMetadata = window.openai?.toolResponseMetadata;
-        if (initialMetadata) render(initialMetadata);
-        else if (window.openai?.toolOutput) render({ structuredContent: window.openai.toolOutput, content: [] });
+        toolInput = window.openai?.toolInput ? asObject(window.openai.toolInput) : null;
+        if (initialMetadata) render(initialMetadata, { mediaQuery: toolInput });
+        else if (window.openai?.toolOutput) render({ structuredContent: window.openai.toolOutput, content: [] }, { mediaQuery: toolInput });
         if (typeof ResizeObserver === "function") {
           new ResizeObserver(() => {
             if (connected) {

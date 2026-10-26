@@ -565,15 +565,33 @@
 
           const jobId = typeof data.job_id === "string" ? data.job_id : "";
           if (jobId) {
+            const schedule = () => {
+              if (data.terminal !== false) return;
+              if (progressTimer !== null) window.clearTimeout(progressTimer);
+              const delay = Number(data.poll_after_seconds);
+              progressTimer = window.setTimeout(() => {
+                progressTimer = null;
+                void poll();
+              }, (Number.isFinite(delay) && delay > 0 ? delay : 1) * 1000);
+            };
             const poll = async () => {
               if (generation !== progressGeneration) return;
+              let next;
               try {
-                const next = await callTool("get_job_status", { job_id: jobId });
-                if (generation !== progressGeneration) return;
-                render(next);
+                next = await callTool("get_job_status", { job_id: jobId });
               } catch (_error) {
-                if (generation === progressGeneration) notice.textContent = "Could not refresh job status.";
+                if (generation !== progressGeneration) return;
+                notice.textContent = "Could not refresh job status.";
+                schedule();
+                return;
               }
+              if (generation !== progressGeneration) return;
+              if (next.isError) {
+                notice.textContent = "VidXP returned an error checking job status.";
+                schedule();
+                return;
+              }
+              render(next);
             };
             const actions = element("div", "toolbar");
             const refresh = element("button", "button", "Refresh status");
@@ -589,13 +607,7 @@
             });
             actions.append(refresh);
             wrapper.append(actions);
-            if (data.terminal === false) {
-              const delay = Number(data.poll_after_seconds);
-              progressTimer = window.setTimeout(() => {
-                progressTimer = null;
-                void poll();
-              }, (Number.isFinite(delay) && delay > 0 ? delay : 1) * 1000);
-            }
+            schedule();
           }
 
           content.replaceChildren(wrapper);

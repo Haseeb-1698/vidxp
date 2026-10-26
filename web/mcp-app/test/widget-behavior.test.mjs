@@ -255,3 +255,30 @@ test("Load more uses ChatGPT's toolInput for the first page", async () => {
   assert.deepEqual(plain(calls), [{ name: "list_media", args: { state: "ready", cursor: "cursor-2" } }]);
   assert.deepEqual(widget.textsOf("tile-title"), ["first.mp4", "second.mp4"]);
 });
+
+test("a failed or error status check keeps progress on screen and keeps polling", async () => {
+  const widget = createWidget();
+  widget.toolResult(progress);
+
+  await widget.runPollTimers();
+  const failed = widget.toolCalls().at(-1);
+  widget.send({ jsonrpc: "2.0", id: failed.id, error: { message: "network down" } });
+  await flush();
+  assert.equal(widget.roots.notice.textContent, "Could not refresh job status.");
+  assert.equal(widget.pollTimers().length, 1);
+  assert.equal(widget.pollTimers()[0].delay, 1000);
+
+  await widget.runPollTimers();
+  const errored = widget.toolCalls().at(-1);
+  assert.notEqual(errored.id, failed.id);
+  widget.send({
+    jsonrpc: "2.0",
+    id: errored.id,
+    result: { structuredContent: { error: "job store unavailable" }, content: [], isError: true },
+  });
+  await flush();
+  assert.equal(widget.roots.title.textContent, "Indexing progress");
+  assert.ok(widget.findButton("Refresh status"));
+  assert.equal(widget.roots.notice.textContent, "VidXP returned an error checking job status.");
+  assert.equal(widget.pollTimers().length, 1);
+});
